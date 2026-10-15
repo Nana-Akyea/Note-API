@@ -2,20 +2,28 @@ const jwt = require('jsonwebtoken');
 
 const auth = (req, res, next) => {
     try {
-    const token = req.headers.authorization?.split(' ')[1];
-    if(!token) {
-        return res.status(401).json({
-            message: 'Access denied No token provided'
-        });
-    }
-    req.user = jwt.verify(token, process.env.JWT_SECRET_KEY);
-    next();
+        const authorization = req.headers.authorization;
+        if (typeof authorization !== 'string' || !authorization.trim()) {
+            return res.status(401).json({
+                message: 'Access denied: no authorization token provided'
+            });
+        }
+
+        const [scheme, token, ...extraParts] = authorization.trim().split(/\s+/);
+        if (scheme.toLowerCase() !== 'bearer' || !token || extraParts.length > 0) {
+            return res.status(401).json({
+                message: 'Authorization header must use the Bearer scheme'
+            });
+        }
+
+        req.user = jwt.verify(token, process.env.JWT_SECRET_KEY);
+        next();
 
     } catch (error) {
         return res.status(401).json({
             message: 'Invalid token'
-            });
-        }
-    };
+        });
+    }
+};
 
-    module.exports = auth;
+module.exports = auth;

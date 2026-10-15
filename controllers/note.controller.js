@@ -1,215 +1,84 @@
-const express = require('express');
-const router = express.Router();
-
 const Note = require('../models/note.model.js');
-const { default: mongoose } = require('mongoose');
+const buildNoteListQuery = require('../utils/noteQuery.js');
 
-router.post('/api/notes', async (req, res, next) => {
+// POST /api/notes
+const createNote = async (req, res, next) => {
     try {
-        const { title, content, category, tags } = req.body;
-
-        const newNote = await Note.create({
-            title,
-            content,
-            category,
-            tags
-        });
-
-         res.status(201).json({
-            message: 'Note created successfully',
-            note: newNote
-        });
+        const note = await Note.create({ ...req.body, owner: req.user.id });
+        res.status(201).json({ message: 'Note created successfully', note });
     } catch (error) {
-        res.status(400).json({ 
-            message: 'Failed to create note',
-            error: error.message 
-        });
+        next(error);
     }
-});
+};
 
-router.get('/api/notes', async (req, res, next) => {
+// GET /api/notes?page=1&limit=10&sort=-createdAt&search=meeting&category=Work&tag=urgent
+const getNotes = async (req, res, next) => {
     try {
-        const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-        const limit = Math.min(
-            100,
-            Math.max(1, parseInt(req.query.limit, 10) || 10)
-        );
-        const skip = (page - 1) * limit;
+        const { page, limit, filter, sort, skip } =
+            buildNoteListQuery(req.query, req.user.id);
 
-        const sort = req.query.sort || '-createdAt'; // Default sort by createdAt descending
-        const allowedSortFields = [
-            'title',
-            '-title',
-            'category',
-            '-category',
-            'createdAt', 
-            'updatedAt'
-        ];
-
-        if (!allowedSortFields.includes(sort)) {
-            return res.status(400).json({
-                message: 'Invalid sort field',
-                error: `Sort field must be one of: ${allowedSortFields.join(', ')}`
-            });
-        }
-
-        const search = (req.query.search || req.query.q || '').trim();
-
-        const filter = {};
-
-        if (search) {
-            filter.$text = { $search: search };
-        }
-
-        if (req.query.category) {
-            filter.category = req.query.category;
-        }
-
-        const [totalCount, notes] = await Promise.all([
+        const [notes, total] = await Promise.all([
             Note.find(filter)
                 .sort(sort)
                 .skip(skip)
                 .limit(limit),
-                
-            Note.countDocuments(filter),
+            Note.countDocuments(filter)
         ]);
 
         res.status(200).json({
-            message: 'Notes fetched successfully',
-            pagination: {
-                page,
-                limit,
-                totalNotes: totalCount,
-                totalPages: Math.ceil(totalCount / limit)
-            },
-            notes,
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+            count: notes.length,
+            notes
         });
     } catch (error) {
-        res.status(400).json({ 
-            message: 'Failed to fetch notes',
-            error: error.message 
-        });
+        next(error);
     }
-})
+};
 
-router.get('/api/notes/:id', async (req, res, next) => {
+// GET /api/notes/:id
+const getNote = async (req, res, next) => {
     try {
-        const { noteId } = req.params;
-
-        const note = await Note.findById(noteId);
-
+        const note = await Note.findOne({ _id: req.params.id, owner: req.user.id });
         if (!note) {
-            return res.status(404).json({
-                message: 'Note not found'
-            });
+            return res.status(404).json({ message: 'Note not found' });
         }
-
-        res.status(200).json({
-            message: 'Note fetched successfully',
-            note
-        });
+        res.status(200).json({ note });
     } catch (error) {
-        if (error.name === 'CastError') {
-            return res.status(400).json({
-                message: 'Invalid note ID',
-                error: error.message
-            });
-        }
-        res.status(400).json({
-            message: 'Failed to fetch note',
-            error: error.message
-        });
+        next(error);
     }
-});
+};
 
-router.put('/api/notes/:id', async (req, res, next) => {
+// PUT /api/notes/:id
+const updateNote = async (req, res, next) => {
     try {
-        const { noteId } = req.params;
-        const { title, content, category, tags } = req.body;
-
-        // Validate input fields
-        if (
-            typeof title !== 'string' ||
-            typeof content !== 'string' ||
-            !content.trim()
-        ) {
-            return res.status(400).json({
-                message: 'Invalid input data',
-                error: 'Title and content must be non-empty strings'
-            });
-        }
-
-        //Validate category and tags if provided
-        if (
-            category !== undefined &&
-            (typeof category !== 'string' || !category.trim()) 
-        ) {
-            return res.status(400).json({
-                message: 'Invalid category',
-                error: 'Category must be a non-empty string'
-            });
-        }
-
-        if (
-            tags !== undefined &&
-            (!Array.isArray(tags) || 
-            !tags.every(tag => typeof tag === 'string'))
-        ) {
-            return res.status(400).json({
-                message: 'Invalid tags',
-                error: 'Tags must be an array of non-empty strings'
-            });
-        }
-
-        // Update the note in the database
-        const updatedNote = await Note.findByIdAndUpdate(
-            noteId,
-            { title: title.trim(),
-                 content: content.trim(), 
-                 category: category === undefined ? 'General' : category.trim(),
-                 tags: tags === undefined ? [] : tags 
-            },
-            { 
-                new: true, 
-                runValidators: true 
-            }
+        const note = await Note.findOneAndUpdate(
+            { _id: req.params.id, owner: req.user.id },
+            req.body,
+            { returnDocument: 'after', runValidators: true }
         );
-
-        // Check if the note was found and updated
-        if (!updatedNote) {
-            return res.status(404).json({
-                message: 'Note not found'
-            });
+        if (!note) {
+            return res.status(404).json({ message: 'Note not found' });
         }
-
-        res.status(200).json({
-            message: 'Note updated successfully',
-            note: updatedNote
-        });
+        res.status(200).json({ message: 'Note updated successfully', note });
     } catch (error) {
-        if (error.name === 'CastError') {
-            return res.status(400).json({
-                message: 'Invalid note ID',
-                error: error.message
-            });
-        }
-        res.status(400).json({
-            message: 'Failed to update note',
-            error: error.message
-        });
+        next(error);
     }
-});
+};
 
-router.delete('/api/notes/:id', async (req, res, next) => {
-  try {
-    await Page.findByIdAndDelete({
-         _id: req.params.id, owner: req.user.id }, { isArchived: false });
-    res.json({ message: 'Moved to trash' });
-  } catch (e) { next(e); }
-}
+// DELETE /api/notes/:id
+const deleteNote = async (req, res, next) => {
+    try {
+        const note = await Note.findOneAndDelete({ _id: req.params.id, owner: req.user.id });
+        if (!note) {
+            return res.status(404).json({ message: 'Note not found' });
+        }
+        res.status(200).json({ message: 'Note deleted successfully' });
+    } catch (error) {
+        next(error);
+    }
+};
 
-);
-
-const ctrl = mongoose.model( 'ctrl',  createPage, getPages, getPage, updatePage, deletePage)
-
-    module.exports = { ctrl };
+module.exports = { createNote, getNotes, getNote, updateNote, deleteNote };

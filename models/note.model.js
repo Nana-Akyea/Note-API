@@ -1,77 +1,39 @@
-const { required, valid } = require('joi');
 const mongoose = require('mongoose');
 
-const noteSchema = new mongoose.Schema({
-    id: {
-        type: String,
-        required: true
+const noteSchema = new mongoose.Schema(
+    {
+        title: {
+            type: String,
+            required: [true, 'Title is required'],
+            trim: true,
+            maxlength: 200
+        },
+        content: {
+            type: String,
+            required: [true, 'Content is required'],
+            trim: true
+        },
+        category: {
+            type: String,
+            trim: true,
+            default: 'General'
+        },
+        tags: [{
+            type: String,
+            trim: true,
+            lowercase: true
+        }],
+        owner: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'User',
+            required: true,
+            index: true
+        }
     },
-    category: {
-        type: String,
-        valid: ('Paragraph', 'h1', 'h2', 'h3', 'todo', 'bulleted_list', 'image', 'divider', 'code', 'numbered_list'),
-        default: 'Paragraph',
-        required: true
-    },
-    content: {
-        type: String,
-        default: ''
-    },
-    checked: {
-        type: Boolean,
-        default: false
-    }, // for todo 
-    language: {
-        type: String,
-        default: 'javascript' 
-    },  // for code
-}, {id: false});
-
-
-
-const pageSchema = new mongoose.Schema({
-    title: {
-        type: String,
-        default: 'Untitled'
-    },
-    icon: {
-        type: String,
-        default: '📄'
-    },
-    cover: {
-        type: String,
-        default: ''
-    },
-    owner: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User',
-        required: true
-    },
-    parent: {
-        type: mongoose.Schema.Types.ObjectId,
-        REF: 'Page',
-        default: null
-    },  // for subpages
-    blocks: [noteSchema],
-    isFavourite: {
-        type: Boolean,
-        default: false
-    },
-    isArchived: {
-        type: Boolean,
-        default: false
-    },
-    sharedWith: [{
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'User'
-    }],
-},
     { timestamps: true }
 );
 
+// Text index for ?search= / ?q= (title matches rank higher than content)
+noteSchema.index({ title: 'text', content: 'text' }, { weights: { title: 3, content: 1 } });
 
-pageSchema.index({ owner: 1, parent: 1, unique: true });
-
-const Note = mongoose.model('Page', pageSchema);
-
-module.exports = Note;
-    
+module.exports = mongoose.model('Note', noteSchema);
